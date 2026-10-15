@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const fs = require('fs');
 const P = require('pino');
 const settings = require('./settings.js');
@@ -10,28 +10,27 @@ app.use(express.json());
 app.use(express.urlencoded({extended:true}));
 
 let sock;
-let pairCodes = {};
 
-// BEAUTIFUL PAIR PAGE
+// --- PAIR SITE ---
 app.get('/', (req,res)=>{
   res.send(`
   <html><head><meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>body{background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}input{padding:12px;width:250px;border-radius:8px;border:none;margin:10px}button{padding:12px 25px;background:#25D366;border:none;border-radius:8px;font-weight:bold;cursor:pointer}h2{color:#25D366}.code{font-size:32px;letter-spacing:5px;background:#222;padding:15px;border-radius:10px;margin-top:15px}</style>
+  <style>body{background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}input{padding:12px;width:250px;border-radius:8px;border:none;margin:10px}button{padding:12px 25px;background:#25D366;border:none;border-radius:8px;font-weight:bold;cursor:pointer}h2{color:#25D366}.code{font-size:32px;letter-spacing:5px;background:#222;padding:15px;border-radius:10px;margin-top:15px}a{color:#888;margin-top:20px;font-size:12px}</style>
   </head><body>
   <h2>HEHE-M BOT PAIR</h2>
-  <p>Enter WhatsApp Number with country code</p>
-  <p>e.g 256779997074</p>
-  <input id="num" placeholder="256XXXXXXXXX">
+  <p>Enter number with country code (no +)</p>
+  <input id="num" placeholder="256779997074" value="256779997074">
   <button onclick="getCode()">Get Pair Code</button>
   <div id="result"></div>
+  <a href="/clear">Clear Session (if code not working)</a>
   <script>
   async function getCode(){
     let n=document.getElementById('num').value;
     if(!n) return alert('Enter number');
-    document.getElementById('result').innerHTML='Generating...';
+    document.getElementById('result').innerHTML='Generating... wait 5 sec';
     let r=await fetch('/code?number='+n);
     let d=await r.json();
-    if(d.code) document.getElementById('result').innerHTML='<p>PAIR CODE FOR '+n+':</p><div class=code>'+d.code+'</div><p>Go to WhatsApp > Linked Devices > Link with phone number</p>';
+    if(d.code) document.getElementById('result').innerHTML='<p>CODE FOR '+n+':</p><div class=code>'+d.code+'</div><p style=color:#25D366>Enter FAST in WhatsApp > Linked Devices > Link with phone number</p><p>Code expires in 20 sec!</p>';
     else document.getElementById('result').innerHTML='<p style=color:red>'+d.error+'</p>';
   }
   </script>
@@ -39,27 +38,35 @@ app.get('/', (req,res)=>{
   `);
 });
 
-// API TO GENERATE CODE FOR ANY NUMBER
 app.get('/code', async (req,res)=>{
   try{
     let number = req.query.number?.replace(/[^0-9]/g,'');
     if(!number) return res.json({error:'Invalid number'});
-    if(!sock) return res.json({error:'Bot not started, wait 10sec and refresh'});
+    if(!sock) return res.json({error:'Bot starting, wait 10sec'});
+    if(sock.authState.creds.registered) return res.json({error:'Already paired! Go clear session if you want new number'});
 
     let code = await sock.requestPairingCode(number);
     console.log(`PAIR CODE FOR ${number}: ${code}`);
     return res.json({code});
   }catch(e){
-    console.log("Pair error:", e.message);
     return res.json({error:e.message});
   }
+});
+
+app.get('/clear', async (req,res)=>{
+  try{
+    if(fs.existsSync('./session')) fs.rmSync('./session',{recursive:true,force:true});
+    res.send('Session cleared! Go back and deploy again on Render. <a href="/">Back</a>');
+  }catch(e){res.send(e.message)}
 });
 
 app.listen(process.env.PORT || 3000, ()=> console.log('Web server running'));
 
 async function startBot(){
+  const { version } = await fetchLatestBaileysVersion();
   const { state, saveCreds } = await useMultiFileAuthState('./session');
   sock = makeWASocket({
+    version,
     auth: state,
     logger: P({level:"silent"}),
     printQRInTerminal:false,
