@@ -5,14 +5,61 @@ const settings = require('./settings.js');
 const path = require('path');
 const express = require('express');
 
-// FIX FOR RENDER PORT ERROR
 const app = express();
-app.get('/', (req,res)=> res.send('HEHE M BOT IS RUNNING'));
+app.use(express.json());
+app.use(express.urlencoded({extended:true}));
+
+let sock;
+let pairCodes = {};
+
+// BEAUTIFUL PAIR PAGE
+app.get('/', (req,res)=>{
+  res.send(`
+  <html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>body{background:#111;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column}input{padding:12px;width:250px;border-radius:8px;border:none;margin:10px}button{padding:12px 25px;background:#25D366;border:none;border-radius:8px;font-weight:bold;cursor:pointer}h2{color:#25D366}.code{font-size:32px;letter-spacing:5px;background:#222;padding:15px;border-radius:10px;margin-top:15px}</style>
+  </head><body>
+  <h2>HEHE-M BOT PAIR</h2>
+  <p>Enter WhatsApp Number with country code</p>
+  <p>e.g 256779997074</p>
+  <input id="num" placeholder="256XXXXXXXXX">
+  <button onclick="getCode()">Get Pair Code</button>
+  <div id="result"></div>
+  <script>
+  async function getCode(){
+    let n=document.getElementById('num').value;
+    if(!n) return alert('Enter number');
+    document.getElementById('result').innerHTML='Generating...';
+    let r=await fetch('/code?number='+n);
+    let d=await r.json();
+    if(d.code) document.getElementById('result').innerHTML='<p>PAIR CODE FOR '+n+':</p><div class=code>'+d.code+'</div><p>Go to WhatsApp > Linked Devices > Link with phone number</p>';
+    else document.getElementById('result').innerHTML='<p style=color:red>'+d.error+'</p>';
+  }
+  </script>
+  </body></html>
+  `);
+});
+
+// API TO GENERATE CODE FOR ANY NUMBER
+app.get('/code', async (req,res)=>{
+  try{
+    let number = req.query.number?.replace(/[^0-9]/g,'');
+    if(!number) return res.json({error:'Invalid number'});
+    if(!sock) return res.json({error:'Bot not started, wait 10sec and refresh'});
+
+    let code = await sock.requestPairingCode(number);
+    console.log(`PAIR CODE FOR ${number}: ${code}`);
+    return res.json({code});
+  }catch(e){
+    console.log("Pair error:", e.message);
+    return res.json({error:e.message});
+  }
+});
+
 app.listen(process.env.PORT || 3000, ()=> console.log('Web server running'));
 
 async function startBot(){
   const { state, saveCreds } = await useMultiFileAuthState('./session');
-  const sock = makeWASocket({
+  sock = makeWASocket({
     auth: state,
     logger: P({level:"silent"}),
     printQRInTerminal:false,
@@ -27,16 +74,6 @@ async function startBot(){
       if(reason!== DisconnectReason.loggedOut) setTimeout(startBot, 3000);
     } else if(connection==='open'){
       console.log("HEHE M Connected ✅");
-    }
-    if(!sock.authState.creds.registered){
-      setTimeout(async()=>{
-        try{
-          let c=await sock.requestPairingCode(settings.pairNumber);
-          console.log("==================================");
-          console.log("PAIR CODE FOR "+settings.pairNumber+": "+c);
-          console.log("==================================");
-        }catch(e){ console.log("Pair error:",e.message); }
-      },5000);
     }
   });
   sock.ev.on('messages.upsert', async ({messages})=>{
